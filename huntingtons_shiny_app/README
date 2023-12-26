@@ -1,0 +1,19 @@
+## Project Overview ##
+
+This is a final project for one of my Master's classes. 
+
+The application is intended to be a tool that can be used to visualize gene expression data. There are 4 tabs (Sample, Counts, Differential Expression, and Gene Set Enrichment Analysis) with multiple subtabs. It's originally intended as an app specifically used for the Huntington's Disease dataset attached in the Data folder. It should be able to be used with other datasets with some minor tweaks, as long as they are normalized with DESeq2. 
+
+
+### Sample tab ###
+The input file is a metadata file in csv format. This tab provides an overview of the metadata, including a summary table, sortable data table, and distribution plots.
+
+### Counts Tab ###
+The input file is a counts matrix in csv format. This tab explores the gene expression data by 
+applying two filters for percent variance and number of non-zero samples. The subtabs include summary of the filtering, diagnostic scatter plots, principal component analysis, and a heatmap.
+
+### Differential Expression Tab ###
+The input file is a DESeq2 results file in csv format. The subtabs include a sortable results table, histograms, Log2FoldChange, a scatter plot, and a volcano plot
+
+### GSEA Tab ###
+The input file is a fgsea results file that was generated using differential expression data in csv format. The subtabs include top pathways that can be filtered, downloadble pathway table, and a scatter plot
