@@ -1,0 +1,379 @@
+import pandas
+
+REPS = ["rep3", "rep4"]
+READS = ["R1", "R2"]
+
+rule all:
+	input:
+		expand("results/ATAC{rep}_{read}_fastqc.html", rep = REPS, read = READS),
+		expand("results/ATAC{rep}_R1_trimmed_P.fastq", rep = REPS),
+		expand("results/ATAC{rep}_R1_trimmed_U.fastq", rep = REPS),
+		expand("results/ATAC{rep}_R2_trimmed_P.fastq", rep = REPS),
+		expand("results/ATAC{rep}_R2_trimmed_U.fastq", rep = REPS),
+		"results/bowtie2_human_genome.1.bt2",
+		"results/bowtie2_human_genome.2.bt2",
+		"results/bowtie2_human_genome.3.bt2",
+		"results/bowtie2_human_genome.4.bt2",
+		"results/bowtie2_human_genome.rev.1.bt2",
+		"results/bowtie2_human_genome.rev.2.bt2",
+		expand("results/ATAC{rep}.bam", rep = REPS),
+		expand("results/ATAC{rep}_sorted.bam", rep = REPS),
+		expand("results/ATAC{rep}_flagstats.txt", rep = REPS),
+		expand("results/ATAC{rep}_sorted.bam.bai", rep = REPS),
+		expand("results/ATAC{rep}_nomito.bam", rep = REPS),
+		expand("results/ATAC{rep}_nomito.bam.bai", rep = REPS),
+		expand("results/ATAC{rep}_shifted.bam", rep = REPS),
+		expand("results/ATAC{rep}_shifted.sorted.bam", rep = REPS),
+		expand("results/ATAC{rep}_shifted.sorted.bam.bai", rep = REPS),
+		expand("results/{rep}_treat_pileup.bdg", rep = REPS),
+		expand("results/{rep}_control_lambda.bdg", rep = REPS),
+		#expand("results/{rep}_peaks.narrowPeak", rep = REPS),
+		#expand("results/{rep}_peaks.xls", rep = REPS),
+		expand("results/{rep}_summits.bed", rep = REPS),
+		"results/reproducible_peaks.bed",
+		"results/reproducible_peaks_filtered.bed",
+		"results/annotated_reproducible_peaks.txt",
+		"results/go_analysis",
+		"results/motif_analysis",
+		expand("results/{rep}_NFR.bw", rep = REPS),
+		expand("results/{rep}_NBR.bw", rep = REPS),
+		expand("results/{rep}_mononuc.bw", rep = REPS),
+		"results/multiBigwigSummary.npz",
+		"results/heatmap_PearsonCorrelation.png",
+		expand ("results/matrix_{rep}.gz", rep = REPS),
+		expand ("results/plot_{rep}.png", rep = REPS)
+
+
+rule fastqc:
+    input:
+        fastq = 'ATAC{rep}_{read}.fastq.gz',
+    output:
+        fastqc = 'results/ATAC{rep}_{read}_fastqc.html'
+    params:
+        outdir = 'results/'
+    threads: 4
+    conda:
+        'envs/fastqc_env.yml'
+    shell:
+        '''
+        fastqc {input.fastq} -o {params.outdir}
+        '''
+
+
+rule trimmomatic:   
+	input:
+		fastq1 = 'ATAC{rep}_R1.fastq.gz',  
+		fastq2 = 'ATAC{rep}_R2.fastq.gz',  
+		adapters = 'NexteraPE-PE.fa'
+	output: 
+		trimmed1_P = 'results/ATAC{rep}_R1_trimmed_P.fastq',
+		trimmed1_U = 'results/ATAC{rep}_R1_trimmed_U.fastq',
+		trimmed2_P = 'results/ATAC{rep}_R2_trimmed_P.fastq',  
+		trimmed2_U = 'results/ATAC{rep}_R2_trimmed_U.fastq'
+	threads: 8
+	conda:
+		'envs/trimmomatic_env.yml'
+	shell:
+		"""
+		trimmomatic PE -threads {threads} {input.fastq1} {input.fastq2} {output.trimmed1_P} {output.trimmed1_U} {output.trimmed2_P} {output.trimmed2_U} \
+		ILLUMINACLIP:NexteraPE-PE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 
+		"""
+
+
+rule bowtie2_build_gencode:
+	input: 
+		genome_ref = 'GRCh38.primary_assembly.genome.fa.gz'
+	output:
+		'results/bowtie2_human_genome.1.bt2',
+		'results/bowtie2_human_genome.2.bt2',
+		'results/bowtie2_human_genome.3.bt2',
+		'results/bowtie2_human_genome.4.bt2',
+		'results/bowtie2_human_genome.rev.1.bt2',
+		'results/bowtie2_human_genome.rev.2.bt2'
+	params:
+		prefix = 'results/bowtie2_human_genome'
+	threads: 16
+	conda:
+		'envs/bowtie2_env.yml'
+	shell:
+		'''
+		bowtie2-build --threads {threads} {input.genome_ref} {params.prefix} 
+		'''
+
+rule bowtie2_align:
+	input:
+		trimmed_fastq1 = 'results/ATAC{rep}_R1_trimmed_P.fastq',
+		trimmed_fastq2 = 'results/ATAC{rep}_R2_trimmed_P.fastq',
+		index_files = expand('results/bowtie2_human_genome.{ext}', ext=['1.bt2', '2.bt2', '3.bt2','4.bt2', 'rev.1.bt2', 'rev.2.bt2'])
+	output:
+		bam_file = 'results/ATAC{rep}.bam'
+	params:
+		index_prefix = 'results/bowtie2_human_genome'
+	threads: 32
+	conda:
+		'envs/bowtie2_env.yml'
+	shell:
+		"""
+		bowtie2 --threads {threads} -X 2000 -x {params.index_prefix} -1 {input.trimmed_fastq1} -2 {input.trimmed_fastq2} | samtools view -bS - > {output.bam_file}
+		"""
+
+rule samtools_sort:
+	input:
+		bam='results/ATAC{rep}.bam'
+	output:
+		sorted_bam='results/ATAC{rep}_sorted.bam'
+	conda:
+		'envs/samtools_env.yml'
+	shell:
+		"""
+		samtools sort -o {output.sorted_bam} {input.bam}
+		"""
+
+rule samtools_flagstat:
+	input:
+		bam = 'results/ATAC{rep}_sorted.bam'
+	output:
+		flag = 'results/ATAC{rep}_flagstats.txt'
+	conda:
+		'envs/samtools_env.yml'
+	shell:
+		"""
+		samtools flagstat {input.bam} > {output.flag}
+		"""
+
+rule samtools_idx:
+	input:
+		sorted_bam='results/ATAC{rep}_sorted.bam'
+	output:
+		bai='results/ATAC{rep}_sorted.bam.bai'
+	conda:
+		'envs/samtools_env.yml'
+	shell:
+		"""
+		samtools index {input.sorted_bam} {output.bai}
+		"""
+
+rule remove_mitochondria_chr:
+	input:
+		bam = 'results/ATAC{rep}_sorted.bam'
+	output:
+		no_mito_bam = 'results/ATAC{rep}_nomito.bam'
+	threads: 16
+	conda: 
+		'envs/samtools_env.yml'
+	shell:
+		"""
+		samtools view -o {output.no_mito_bam} -e 'rname != "chrM"' {input.bam}
+		"""
+
+rule samtools_mito_idx:
+	input:
+		sorted_bam='results/ATAC{rep}_nomito.bam'
+	output:
+		bai='results/ATAC{rep}_nomito.bam.bai'
+	conda:
+		'envs/samtools_env.yml'
+	shell:
+		"""
+		samtools index {input.sorted_bam} {output.bai}
+		"""
+
+rule shift_reads:
+    input:
+        bam = 'results/ATAC{rep}_nomito.bam',
+        bai ='results/ATAC{rep}_nomito.bam.bai'
+    output:
+        shifted_bam = 'results/ATAC{rep}_shifted.bam'
+    threads: 16
+    conda: 
+        'envs/deeptools_env.yml'
+    shell:
+        """
+        alignmentSieve -b {input.bam} -o {output.shifted_bam} --ATACshift
+        """
+
+rule samtools_sort_shifted:
+	input:
+		bam='results/ATAC{rep}_shifted.bam'
+	output:
+		sorted_bam='results/ATAC{rep}_shifted.sorted.bam'
+	conda:
+		'envs/samtools_env.yml'
+	shell:
+		"""
+		samtools sort -o {output.sorted_bam} {input.bam}
+		"""
+
+
+rule samtools_shifted_idx:
+	input:
+		shifted_bam='results/ATAC{rep}_shifted.sorted.bam'
+	output:
+		bai='results/ATAC{rep}_shifted.sorted.bam.bai'
+	conda:
+		'envs/samtools_env.yml'
+	shell:
+		"""
+		samtools index {input.shifted_bam} {output.bai}
+		"""
+
+rule call_peaks:
+	input:
+		shifted_bam='results/ATAC{rep}_shifted.sorted.bam',
+		shifted_bai='results/ATAC{rep}_shifted.sorted.bam.bai'
+	output:
+		pileup = 'results/{rep}_treat_pileup.bdg',
+		lamda = 'results/{rep}_control_lambda.bdg',
+		narrowpeak = 'results/{rep}_peaks.narrowPeak',
+		xls = 'results/{rep}_peaks.xls',
+		summits = 'results/{rep}_summits.bed'
+	params:
+		name = '{rep}',
+		outdir = 'results/'
+	threads:32
+	conda:
+		'envs/macs3_env.yml'
+	shell:
+		"""
+		macs3 callpeak -f BAMPE -t {input.shifted_bam} -g hs -n {params.name} -B -q 0.01 --outdir {params.outdir}
+		"""
+
+
+rule intersect_peaks:
+	input:
+		peak1 = 'results/rep3_summits.bed',
+		peak2 = 'results/rep4_summits.bed',
+	output:
+		rep_peaks='results/reproducible_peaks.bed'
+	conda:
+		'envs/bedtools_env.yml'
+	shell:
+		"""
+		bedtools intersect -a {input.peak1} -b {input.peak2} -f 0.50 -r > {output.rep_peaks}
+		"""
+
+
+rule filter_blacklist:
+	input:
+		blacklist = 'results/hg38-blacklist.v2.bed',
+		rep_peaks = 'results/reproducible_peaks.bed'
+	output:
+		filtered = 'results/reproducible_peaks_filtered.bed'
+	conda:
+		'envs/bedtools_env.yml'
+	shell:
+		"""
+		bedtools intersect -v -a {input.rep_peaks} -b {input.blacklist} > {output.filtered}
+		"""
+
+
+rule annotate_peaks:
+	input:
+		peaks = 'results/reproducible_peaks_filtered.bed',
+		gtf = 'results/gencode.v45.primary_assembly.annotation.gtf'
+	output:
+		annotated_peaks = 'results/annotated_reproducible_peaks.txt',
+		go_output = directory('results/go_analysis')
+	conda:
+		'envs/homer_env.yml'
+	shell:
+		"""
+		annotatePeaks.pl {input.peaks} hg38 -gtf {input.gtf} -go {output.go_output} > {output.annotated_peaks}
+		"""
+
+
+rule motifs:
+	input:
+		genome = 'results/GRCh38.primary_assembly.genome.fa',
+		peaks = 'results/reproducible_peaks_filtered.bed'
+	output:
+		motif_output = directory('results/motif_analysis')
+	conda:
+		'envs/homer_env.yml'
+	shell:
+		"""
+		findMotifsGenome.pl {input.peaks} {input.genome} {output.motif_output} -size 200 -mask
+		"""
+
+rule bamCoverage:
+	input:
+		shifted_bam='results/ATAC{rep}_shifted.sorted.bam',
+		shifted_bai='results/ATAC{rep}_shifted.sorted.bam.bai'
+	output:
+		nfr ='results/{rep}_NFR.bw',
+		nbr ='results/{rep}_NBR.bw',
+		mononuc ='results/{rep}_mononuc.bw'
+	params:
+		nfr_min = 0,
+		nfr_max = 100, 
+		mononuc_min = 180,  
+		mononuc_max = 247 
+	threads: 16
+	conda:
+		'envs/deeptools_env.yml'
+	shell:
+		"""
+		bamCoverage -b {input.shifted_bam} --outFileName {output.nfr}  --minFragmentLength {params.nfr_min} --maxFragmentLength {params.nfr_max}
+		bamCoverage -b {input.shifted_bam} --outFileName {output.nbr}  --minFragmentLength {params.nfr_max}
+		bamCoverage -b {input.shifted_bam} --outFileName {output.mononuc}  --minFragmentLength {params.mononuc_min} --maxFragmentLength {params.mononuc_max}
+		"""
+
+rule multiBwSummary:
+	input:
+		nfr = expand("results/{rep}_NFR.bw", rep=REPS),
+		nbr = expand("results/{rep}_NBR.bw", rep=REPS),
+		mononuc = expand("results/{rep}_mononuc.bw", rep=REPS)
+	output:
+		matrix='results/multiBigwigSummary.npz'
+	conda:
+		'envs/deeptools_env.yml'
+	shell:
+		"""
+		multiBigwigSummary bins -b {input.nfr} {input.nbr} {input.mononuc} -o {output.matrix}
+		"""
+
+rule plotCorrelation:
+	input:
+		matrix='results/multiBigwigSummary.npz'
+	output:
+		heatmap='results/heatmap_PearsonCorrelation.png'
+	conda:
+		'envs/deeptools_env.yml'
+	shell:
+		"""
+		plotCorrelation -in {input.matrix} --corMethod pearson --skipZeros --plotTitle "Pearson Correlation of Samples" --whatToPlot heatmap --colorMap RdYlBu --plotNumbers -o {output.heatmap}
+		"""
+
+rule computeMatrix:
+    input:
+        nfr_bw = "results/{rep}_NFR.bw",
+        nbr_bw = "results/{rep}_NBR.bw",
+        mononuc_bw = "results/{rep}_mononuc.bw",
+        bed = "results/hg38_genes.bed"
+    output:
+        #mat_nfr = "results/matrix_{rep}_NFR.gz",
+        #mat_nbr = "results/matrix_{rep}_NBR.gz",
+        #mat_mononuc = "results/matrix_{rep}_mononuc.gz"
+        mat = "results/matrix_{rep}.gz"
+    conda:
+        'envs/deeptools_env.yml'
+    threads: 4
+    shell:
+        """
+        computeMatrix scale-regions -S {input.nfr_bw} {input.nbr_bw} {input.mononuc_bw} -R {input.bed} -b 2000 -a 2000 -o {output.mat} 
+        """
+
+rule plotMatrix1:
+    input:
+        #matrix_nfr = "results/matrix_{rep}_NFR.gz",
+        #matrix_nbr = "results/matrix_{rep}_NBR.gz",
+        #matrix_mononuc = "results/matrix_{rep}_mononuc.gz"
+        mat = "results/matrix_{rep}.gz"
+    output:
+        pic = "results/plot_{rep}.png"
+    conda:
+        'envs/deeptools_env.yml'
+    shell:
+        """
+        plotProfile -m {input.mat} -o {output.pic} --perGroup
+        """

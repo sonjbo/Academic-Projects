@@ -1,0 +1,136 @@
+```{r}
+source('ATACSeqQC.R')
+```
+
+
+```{r}
+#creating fragment size plots for each sample
+
+rep3 <- "results/ATACrep3_shifted.sorted.bam"
+rep4 <- "results/ATACrep4_shifted.sorted.bam"
+
+rep3.labels <- gsub(".bam", "", basename(rep3))
+rep4.labels <- gsub(".bam", "", basename(rep4))
+
+fragSize_rep3 <- (rep3, rep3.labels)
+fragSize_rep3
+fragSize_rep4 <- fragSizeDist(rep4, rep4.labels)
+fragSize_rep4
+```
+
+```{r}
+go_peaks <- read.csv("results/go_terms_peaks.csv")
+go_peaks$gene_ratio <- ifelse(
+    go_peaks$num_target_genes == 0, NA,  
+    go_peaks$num_target_genes_in_term / go_peaks$num_target_genes
+)
+go_peaks
+```
+
+```{r}
+#creating a dot plot for the top 20 GO terms
+
+top_go_peaks <- go_peaks %>%
+    arrange(P.value) %>% #arrange rows by ascending p-value
+    slice(1:20) #select top 20 rows
+
+print(top_go_peaks)
+ggplot(top_go_peaks, aes(x = gene_ratio, y = reorder(Term, gene_ratio), size = num_target_genes_in_term, color = P.value)) +
+    geom_point(alpha = 0.8) +
+    scale_color_viridis_c(option = "D", direction = -1) +
+    scale_size_continuous(range = c(2, 12)) +
+    labs(
+        x = "Gene Ratio",
+        y = "GO Term",
+        color = "P-value",
+        size = "Number of Target Genes"  
+    ) +
+    ggtitle("GO Enrichment Terms for Annotated Peaks") +
+    theme_minimal() +
+    theme(
+        axis.text.y = element_text(size = 8),
+        legend.position = "right",
+        legend.title = element_text(size = 10),  # Adjusts the title size
+        legend.key.size = unit(0.3, "cm")  # Adjusts the key size
+    )
+
+```
+
+```{r}
+#creating a dataframe with annotated peaks
+
+annotated_peaks <- read.table("results/annotated_reproducible_peaks.txt", header = TRUE, sep = "\t")
+
+#changing first column name
+colnames(annotated_peaks)[colnames(annotated_peaks) == "PeakID..cmd.annotatePeaks.pl.results.reproducible_peaks_filtered.bed.hg38..gtf.results.gencode.v45.primary_assembly.annotation.gtf..go.results.go_analysis."] <- "peak_id"
+
+#removing transcript ids for plotting
+annotated_peaks$region_clean <- gsub("\\s*\\(.*\\)", "", annotated_peaks$Annotation)
+annotated_peaks
+```
+
+```{r}
+#plotting region distributions 
+
+region_proportions <- annotated_peaks %>%
+    count(region_clean) %>%
+    mutate(proportion = n / sum(n))
+
+ggplot(region_proportions, aes(x = reorder(region_clean, -proportion), y = proportion, fill = region_clean)) +
+    geom_bar(stat = "identity") +
+    labs(
+        title = "Proportions of Regions in Annotated Peaks",
+        x = "Region Type",
+        y = "Proportion"
+    ) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+bed_unfilt <- as.data.frame(read.table("results/reproducible_peaks.bed",header = FALSE, sep="\t",stringsAsFactors=FALSE))
+bed_unfilt
+bed <- as.data.frame(read.table("results/reproducible_peaks_filtered.bed",header = FALSE, sep="\t",stringsAsFactors=FALSE))
+bed
+```
+
+```{r}
+rep4_bed <- as.data.frame(read.table("results/rep4_summits.bed",header = FALSE, sep="\t",stringsAsFactors=FALSE))
+rep4_bed_count <- nrow(rep4_bed)
+rep4_bed_count
+rep3_bed <- as.data.frame(read.table("results/rep3_summits.bed",header = FALSE, sep="\t",stringsAsFactors=FALSE))
+rep3_bed_count <- nrow(rep3_bed)
+rep3_bed_count
+rep_bed_counts <-nrow(bed)
+rep_bed_counts
+```
+
+```{r}
+peak_summary <- data.frame(
+    row.names = c("Replicate 3", "Replicate 4", "Reproducible Peaks"),
+   'Peak_Count' = c(rep3_bed_count, rep4_bed_count, rep_bed_counts)
+)
+
+peak_summary
+```
+
+```{r}
+rep3
+rep4
+rep3_nomito <- "results/ATACrep3_nomito.bam"
+rep4_nomito <- "results/ATACrep4_nomito.bam"
+#rep3_nomito 16569 (mito)
+#rep4_nomito 16569
+```
+
+```{r}
+
+alignment_data <- data.frame(
+  Sample = c("Replicate 3", "Replicate 4"),
+  Total_Alignments = c(156996160, 115640072),
+  Mitochondrial_Alignments = c(116331965, 84837401),
+  Alignments_After_Filtering = c(36224722, 27551934)
+)
+
+alignment_data
+```
